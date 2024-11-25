@@ -1,0 +1,411 @@
+---
+# script name : "FDS Final Project: Report #1"
+author: "José Antonio Ojea"
+date: "2023-01-19"
+output: html_document
+df_print: paged
+---
+
+
+```{r Libraries & read_html, include=FALSE}
+
+# call libraries
+library(rvest)
+library(tibble)
+library(xml2)
+library(httr) 
+library(dplyr)
+library(janitor)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(infer)
+library(tidygeocoder)
+library(leaflet)
+library(knitr)
+
+ rental_html <- xml2::read_html("https://epfl-exts.github.io/rental-scrape/")
+ 
+ Geo_code_api <- GET("https://geocode.xyz/address?json=1&auth=837771739714664856586x20515")
+
+``` 
+
+```{r Part 1 - Web Scrapping, include=FALSE}
+# Scrapping & creating tibble
+#label for each colums
+address <- rental_html %>% 
+  html_nodes(css = ".address") %>% 
+  html_text() %>% 
+  as.data.frame()
+
+living_space <- rental_html %>% 
+  html_nodes(css = ".living-space") %>% 
+  html_text() %>% 
+  as.data.frame()
+
+floor <- rental_html %>% 
+  html_nodes(css = ".floor") %>% 
+  html_text() %>% 
+  as.data.frame()
+
+usable_surface <- rental_html %>% 
+  html_nodes(css = ".usable-surface") %>% 
+  html_text() %>% 
+  as.data.frame()
+  
+availability <- rental_html %>% 
+  html_nodes(css = ".availability") %>% 
+  html_text() %>% 
+  as.data.frame()
+  
+object_type <- rental_html %>% 
+  html_nodes(css = ".object-type") %>% 
+  html_text() %>% 
+  as.data.frame()
+
+rooms <- rental_html %>% 
+  html_nodes(css = ".rooms") %>% 
+  html_text() %>% 
+  as.data.frame()
+
+price <- rental_html %>% 
+  html_nodes(css = ".price") %>% 
+  html_text() %>% 
+  as.data.frame()
+
+# column names
+names(address) <- "address"
+names(living_space) <- "living_space"
+names(floor) <- "floor"
+names(usable_surface) <- "usable_surface"
+names(availability) <- "availability"
+names(object_type) <- "object_type"
+names(rooms) <- "rooms"
+names(price) <- "price"
+
+# Create tibble with bind_cols
+
+rental_raw <- tibble(address, price, object_type, rooms, living_space, floor, availability, usable_surface) 
+
+# Data cleaning
+rental <- rental_raw %>% 
+  clean_names() %>% 
+  mutate(floor = str_replace(floor, "Floor:", ""),
+         floor = as.numeric(str_replace(floor, "Underground", "-1")),
+         price = str_replace(price, "\n\t      \t\t\n\t      \t\t", ""),
+         price = str_replace(price, "\n      \t\t", ""),
+         price = as.numeric(str_replace(price, " CHF", "")),
+         availability = str_replace(availability, "Availability: ", ""),
+         availability = str_replace(availability, "\nSee More\n", ""),
+         availability = str_replace(availability, "NA", ""),
+         usable_surface = str_replace(usable_surface, "Usable surface: ", ""),
+         usable_surface = as.numeric(str_replace(usable_surface, "m2", "")),
+         rooms = as.numeric(str_extract(rooms, "[:digit:]")),
+         living_space = str_replace(living_space, "Living space: ", ""),
+         living_space = as.numeric(str_replace(living_space, " m2", "")),
+         currency = "CHF") %>% 
+  relocate(currency, .after = price) %>% 
+  view()
+``` 
+
+## **Part 1**
+
+Is rental_raw a tibble? _`r is.tibble(rental_raw)`_
+
+```{r Part 2 - Scatterplot, echo=FALSE}
+# Create Scatterplot Part 2
+Dash_scatterplot <- ggplot(data = rental,
+                           mapping = aes(x = living_space,
+                                         y = price)) +
+  geom_point(alpha= 0.3, fill = "purple",
+             na.rm = TRUE) +
+  labs(title = "Correlation between Price & Living space",
+       subtitle = "We can notice that there is a positive correlation between those variables",
+       x = "Living space",
+       y = "Price (CHF)") 
+```
+
+## **Part 2**
+
+The distribution of values are quite concentrated a living space between 50 up to _180 $m^2$_.
+
+```{r Dash_scatterplot, echo=FALSE}
+Dash_scatterplot
+```
+
+
+```{r Par 3 - Bar chart, echo=FALSE, message=FALSE, warning=FALSE}
+# Create tibble for dashboard
+# In order to have a most visible plot, I only display the top 10
+Data_bar <- rental %>% 
+  group_by(address) %>%
+  mutate(address = str_extract(address, "\\d{4}")) %>% 
+  summarise(total_residences = n()) %>%
+  head(10)
+
+
+bar_plot <- Data_bar %>% 
+  ggplot(mapping = aes(x = total_residences,
+                       y = reorder(address, total_residences))) +
+  
+  geom_col()+
+  labs(title = "Top 10 of residences per Postcode",
+       subtitle = "The top 3 where the agency is more active are the areas 1206, 1205, 1208",
+       x= "Number of residences",
+       y= "Postcode")+
+  theme_minimal() 
+```
+
+## **Part 3 **
+
+We can notice that the top 10 of postcode are between _1200_ up to _1209._
+```{r Bar plot, echo=FALSE}
+bar_plot
+```
+
+```{r Part -4 - Scatterplot, echo=FALSE, message=TRUE, warning=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+
+Data_scatterplot <- rental %>% 
+  mutate(address = str_extract(address, "\\d{4}")) %>%
+  filter(floor <= 6) %>% 
+  select(price, living_space, floor, address) 
+
+Scatterplot <- Data_scatterplot %>% 
+  ggplot(mapping = aes(x = living_space,
+                       y = price)) +
+  geom_point(aes(color= address), na.rm = TRUE, show.legend = FALSE) +
+  facet_wrap(vars(floor))+
+  labs(title = "Price of flats over living space",
+       caption = "Showing floor 1 to 6",
+       x= "Surface in m2",
+       y= "Price")
+
+# waiting answers from teachers
+Price_average <- Data_scatterplot %>% 
+  mutate(avg_price = mean(price))
+```
+
+## **Part 4**
+
+Here is a scatterplot that shows the evolution of price with the surface in $m^2$. There is a tile per each floors of our dataset. 
+We can notice that lots of apartments are between the floor _1 to 3_.
+
+```{r Part 4 - Display, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+
+Scatterplot + theme(legend.position = "bottom")
+```
+
+
+```{r Part 5 - Violin / Bloxpot, echo=FALSE, message=FALSE}
+# new chunk in order to display the graph and so on. 
+tibble_comparison_raw <- rental %>% 
+  separate(col = address, into = c("location", "postcode"), sep = ",") 
+
+tibble_comparison_b <- tibble_comparison_raw %>% 
+  mutate(location= str_replace(location, "Sur demande", "sur demande"),
+         location=str_replace(location, "Address on request", "sur demande")) %>% 
+  view()
+
+tibble_comparison <- tibble_comparison_b %>% 
+  mutate(location=if_else(condition =(location!="sur demande"),true = "Autres", false = "sur demande")) %>% 
+  drop_na(price, floor, living_space) %>% 
+  view()
+
+price_comparison <- tibble_comparison %>% 
+  ggplot(mapping = aes(x = location, y = price)) +
+  geom_violin()+
+  geom_boxplot(width = 0.3)
+
+space_comparison <- tibble_comparison %>% 
+  ggplot(mapping = aes(x = location, y = living_space)) +
+  geom_violin()+
+  geom_boxplot(width = 0.3)
+
+High_floor_comparison <- tibble_comparison %>% 
+  ggplot(mapping = aes(x = location, y = floor)) +
+  geom_violin()+
+  geom_boxplot(width = 0.3)
+```
+
+## **Part 5 - Variables comparisons with the attribute Location**
+
+### *Price Comparison*
+
+Price values from _Autres_ are less distributed than _sur demande_ and it has more outliers. Higher median for sur _demande._
+
+```{r Comparison plots, echo=FALSE}
+price_comparison
+```
+
+### *Space Comparison*
+
+- Autres: less median
+- Sur demande: living space is more concentrated between _100 up to 200 $m^2$_.
+
+```{r echo=FALSE}
+space_comparison
+```
+
+### *Floor Comparison*
+
+- Autres: median are higher than _sur demande_.
+- Sur demande: floors seems less higher than _Autres_.
+
+```{r echo=FALSE}
+High_floor_comparison
+```
+
+
+```{r Part 6 - T-test, message=FALSE, warning=FALSE, include=FALSE}
+# Make a table summarizing group size, median, average, standard-deviation, minimum and maximum of the variable price per square-meter 
+
+tibble_statistics <- tibble_comparison %>% 
+    mutate(price_per_m2 = price/living_space) 
+
+# Boxplot in order to confirm the outlier
+
+plot_part6 <- tibble_statistics %>% 
+  ggplot(mapping = aes(x = location,
+                       y = price_per_m2))+
+  geom_violin()+
+  geom_boxplot(width = 0.3)
+
+# Delete outlier
+tibble_statistics <- tibble_statistics %>% 
+  filter(price_per_m2 < 2000)
+  
+# Descriptive Statistics
+comparison_table <- tibble_statistics %>% 
+  group_by(location) %>% 
+  summarise(group_size = n(),
+            median_price = median(price),
+            median_p_m2 = median(price_per_m2),
+            median_space = median(living_space),
+            mean_price = mean(price),
+            mean_p_m2 = mean(price_per_m2),
+            mean_space = mean(living_space),
+            sd_price = sd(price),
+            sd_p_m2 = sd(price_per_m2),
+            sd_space = sd(living_space),
+            sd_floor = sd(floor),
+            min_price_m2 = min(price_per_m2),
+            max_price_m2 = max(price_per_m2)) 
+
+# T-test "Price_per_m2"
+t_test_part6 <- tibble_statistics %>% 
+  group_by(location) %>% 
+  t_test(price_per_m2 ~ location,
+         order = c("Autres", "sur demande"),
+         var.equal  = FALSE) 
+
+ # T-test "Price
+t_test_part7 <- tibble_statistics %>% 
+  group_by(location) %>% 
+  t_test(price ~ location,
+         var.equal  = FALSE) 
+```
+## **Part 6 - Descriptive Analysis**
+
+There is a clear outlier on _Autres_.
+
+```{r Display part 6, echo=FALSE}
+plot_part6
+```
+
+```{r Display part 6.1, echo=FALSE}
+kable(comparison_table)
+```
+
+Thanks to the boxplot we can notice an outlier for the label _Autres_ which has a price above _2000.-CHF/$m^2$_. This outlier impact our analysis then we have to delete it. 
+
+Now, if we compare both samples from the table above  we can generally notice the number of observations between the locations `r comparison_table %>%  pull(location)`  are not equal at all. Indeed, the number of observations of a test are pretty important because the more you have observations, the more your the statistical tests are stronger. 
+
+Then the observations from `r comparison_table %>%  pull(location)` with n = to `r comparison_table$group_size`, I believe the descriptive test for the label _Autres_ are stronger than _Sur demande_. 
+
+The sd_price for `r comparison_table %>%  pull(location)` shows us that prices from _sur demande_ are more spread. 
+
+is shows price for flats with the label _sur demande_ are widely spread rather than _Autres_. The median and mean price is more elevated for flats _sur demande_.
+
+Stats         | Median Price  | Mean Price
+------------- | ------------- | -------------
+Autres        | 2850 CHF      | 3389.17 CHF
+sur demande   | 4300 CHF      | 4785.17	CHF
+
+
+## **Part 6 - T-Test Analysis**
+
+```{r Part 6 / 7 - T-tests, echo=FALSE}
+kable(t_test_part6)
+```
+
+*Hypothesis:*
+
+- H0: the average *price per square-meter* for the flats `r comparison_table %>%  pull(location)` are equal.
+
+- H1: the average *price per square-meter* for the flats `r comparison_table %>%  pull(location)` are different.
+
+*Results:* 
+The results from the t-test shows that we can reject H1 because de p-value is higher than 0.05, which is `r t_test_part6$p_value`. Then, we can reject H1 and affirm that there is no mean difference between `r comparison_table %>%  pull(location)`. 
+
+## **Part 7**
+
+*Hypothesis:*
+
+- H0: the average *price* for the flats `r comparison_table %>%  pull(location)` are equal.
+
+- H1: the average *price* for the flats `r comparison_table %>%  pull(location)` are different.
+
+```{r Part 7 - Display T-test, echo=FALSE}
+kable(t_test_part7)
+```
+
+*Results:* 
+
+The t-test affirms that the average _price_  for flats `r comparison_table %>%  pull(location)` are  different because the p-value is `r t_test_part7$p_value` (less than 0.05). Then we can affirm that our t-test is correct and we can reject H0. 
+
+**Compare the results of price per square meter with those for price. Are there differences between the results?**
+
+```{r Display Price VS p_m^2, echo=FALSE}
+comparison_table %>% 
+  select(location, mean_price, median_price, sd_price, mean_p_m2, median_p_m2, sd_p_m2) %>% 
+  kable()
+```
+
+The average *price per square-meter* for the flats `r comparison_table %>%  pull(location)` are more or less equal. Then we can conclude that $m^2$ doesn't impact the price.
+
+#### How would you interpret these differences?
+
+We can easily interpret that the average is different because flats with a *price* "sur demande" is more expensive than a flat with a displayed price. However, this difference is not related to the meter squares but it might seems being from the location where the flats are build.
+
+```{r API, message=FALSE, warning=FALSE, include=FALSE}
+tibble_for_api <- rental %>% 
+  filter(!str_detect(address, "[:alpha:]ur demande"),
+         !str_detect(address, "Address on request,"),
+         !str_detect(address, "Av. Bel-Air 45A,")) %>% 
+  head(30) %>% 
+  geocode(address) 
+
+map <- tibble_for_api %>% 
+  leaflet() %>% 
+  addTiles() %>% 
+  addMarkers(lng=~long,lat=~lat)
+
+```
+
+## **Part 8**
+
+Here is a bunch of 30 addresses from the rental agency:
+
+```{r map, echo=FALSE}
+map
+```
